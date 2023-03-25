@@ -120,6 +120,10 @@ sc.pl.umap(integrated[rand_is, :], color=['MS4A1'], add_outline=False, legend_lo
 sc.pl.umap(integrated[rand_is, :], color=['EPCAM'], add_outline=False, legend_loc=None, size=20, title='Epithelial Cell', ax=axes[3])
 sc.pl.umap(integrated[rand_is, :], color=['PECAM1'], add_outline=False, legend_loc=None, size=20, title='Endothelial Cell', ax=axes[4])
 
+sc.pl.umap(integrated[rand_is, :], color=['CD14', 'LYZ', 'FCGR3A', 'MS4A7'], add_outline=False, legend_loc=None, size=20, ncols=2) # Monocyte (2 different types)
+sc.pl.umap(integrated[rand_is, :], color=['GNLY', 'NKG7'], add_outline=False, legend_loc=None, size=20) # NK cells
+sc.pl.umap(integrated[rand_is, :], add_outline=False, legend_loc=None, size=20, color=['FCER1A', 'CST3']) # DC 
+
 sc.tl.leiden(integrated, resolution=0.5, key_added='leiden_r05') #### 0 ~  ==> 2023-03-23
 sc.tl.leiden(integrated, resolution=1.0, key_added='leiden_r10')
 sc.pl.umap(test3, color=['batch', 'leiden_r05', 'leiden_r10'], add_outline=False, legend_loc='right margin', size=20)
