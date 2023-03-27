@@ -90,19 +90,24 @@ sc.pp.filter_cells(integrated, min_genes=200)
 sc.pp.filter_cells(integrated, max_genes=8000)
 integrated = integrated[integrated.obs['percent_mito'] < 0.25] # 20,145 cells (only S21_0043584N_MSS & S21_0043584T_MSS, 2023-03-23)
 integrated.layers["counts"] = integrated.X.copy()
+
+# Fork.1
 sc.pp.normalize_total(integrated, target_sum=1e4)
+
+# Fork.1_rest
 sc.pp.log1p(integrated)
 sc.pp.highly_variable_genes(integrated, min_mean=0.0125, max_mean=3, min_disp=0.5)
 integrated.raw = integrated
 integrated.var['highly_variable'].value_counts() # 3,783 (only S21_0043584N_MSS & S21_0043584T_MSS, 2023-03-23)
 sc.pp.scale(integrated, max_value=10)
-sc.tl.pca(integrated, n_comps=50, use_highly_variable=True, svd_solver='arpack')
+sc.tl.pca(integrated, n_comps=100, use_highly_variable=True, svd_solver='arpack')
 sc.pl.pca(integrated, color=['Sample'], legend_loc='right margin', size=8, add_outline=False, color_map='CMRmap', annotate_var_explained=True, components=['1,2'])
 '''
 sc.pp.neighbors(integrated, n_neighbors=10, n_pcs=15) # batch correction 능력 확인
 sc.tl.umap(integrated, min_dist=0.5, spread=1.0, n_components=2, alpha=1.0, gamma=1.0, init_pos='spectral', method='umap')
 sc.pl.umap(integrated[rand_is, :], color=['Sample'], add_outline=False, legend_loc='right margin', size=20)
 '''
+
 sce.pp.bbknn(integrated, batch_key='Sample', n_pcs=15, neighbors_within_batch=5, trim=None)
 sc.tl.umap(integrated, min_dist=0.5, spread=1.0, n_components=2, alpha=1.0, gamma=1.0, init_pos='spectral', method='umap')
 np.random.seed(42)
@@ -149,3 +154,33 @@ sc.pp.filter_genes(integrated, min_cells=5) # 'n_cells' added in integrated.var
 integrated.layers["counts"] = integrated.X.copy()
 integrated.raw = integrated
 '''
+
+
+'''
+Scran pooling normalization 이용
+'''
+# Fork.2
+adata_pp = integrated.copy()
+sc.pp.normalize_per_cell(adata_pp, counts_per_cell_after=1e6)
+sc.pp.log1p(adata_pp)
+sc.tl.pca(adata_pp, n_comps=15) ## 여기서 이 n_component의 숫자를 늘리면 size_factors를 estimation하는 데 도움이 될까?
+sc.pp.neighbors(adata_pp)
+sc.tl.leiden(adata_pp, key_added='groups', resolution=0.5)
+input_groups = adata_pp.obs['groups']
+data_mat = integrated.X.T
+%%R -i data_mat -i input_groups -o size_factors
+size_factors = BiocGenerics::sizeFactors(computeSumFactors(SingleCellExperiment::SingleCellExperiment(list(counts=data_mat)), clusters=input_groups, min.mean=0.1))
+
+
+
+del adata_pp
+integrated.obs['size_factors'] = size_factors
+
+integrated.X /= integrated.obs['size_factors'].values[:, None]
+integrated.X = scipy.sparse.csr_matrix(integrated.X) #왜 이게 새로 들어가야될까????? # 아니면 ERRROR 남 (highly_variable_genes에서)
+
+integrated.layers['scran'] = integrated.X
+
+# Fork.2_rest
+sc.pp.log1p(integrated) # works on anndata.X
+integrated.layers['scran_log1p'] = integrated.X
