@@ -362,7 +362,19 @@ sce_obj <- logNormCounts(sce_obj, log=FALSE) # adds normcounts in assays
 temp_norm <- log(assays(sce_obj)$normcounts +1)
 temp_norm <- as(temp_norm, "dgCMatrix")
 assays(sce_obj)$lognormcounts <- temp_norm
-
 sce_obj$groups <- as.character(sce_obj$groups) # Maybe not necessary (2023-03-30 20:01)
+# rm(counts)
+# rm(cellMeta)
+# rm(geneMeta)
+# rm(seurat_obj)
+# rm(temp_norm)
+
+# For test
+test_obj <- sce_obj[, 1:100] # hundred cell
+predictions.lognormcounts.ref.data <- SingleR(test = test_obj, assay.type.test = 'lognormcounts', ref = ref.data, labels = ref.data$label.fine)
+predictions.lognormcounts.ref.data <- SingleR(test = test_obj, assay.type.test = 'lognormcounts', ref = ref.data, labels = ref.data$label.fine, num.threads = 50) # 이상하게 작동이 안됨...
+predictions.lognormcounts.ref.data <- SingleR(test = test_obj, assay.type.test = 'lognormcounts', ref = ref.data, labels = ref.data$label.fine, BPPARAM = MulticoreParam(50))
+
+
 predictions.lognormcounts.ref.data <- SingleR(test = sce_obj, assay.type.test = 'lognormcounts', ref = ref.data, labels = ref.data$label.fine)
 '''
