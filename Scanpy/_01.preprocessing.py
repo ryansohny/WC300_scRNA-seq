@@ -74,6 +74,8 @@ for sample in [S21_0043584T_MSS, S21_0047298T_MSS, S21_0048032T_MSS, S21_0046021
 
 # First Integrate and then execute QC (Tumor Only)
 integrated = AnnData.concatenate(S21_0043584T_MSS, S21_0047298T_MSS, S21_0048032T_MSS, S21_0046021T_MSI, S21_0048036T_MSI, S21_0049142T_MSI, join='outer', batch_key='Sample', batch_categories = ['S21_0043584T_MSS', 'S21_0047298T_MSS', 'S21_0048032T_MSS', 'S21_0046021T_MSI', 'S21_0048036T_MSI', 'S21_0049142T_MSI'], index_unique = '-')
+integrated.obs['predicted_doublet_cat'] = integrated.obs['predicted_doublet'].astype(str).astype('category')
+
 sc.pp.calculate_qc_metrics(integrated, inplace=True)
 
 sc.pl.violin(integrated, 'total_counts', groupby='Sample', log=True, size=2, cut=0)
@@ -294,6 +296,10 @@ np.random.seed(42)
 rand_is = np.random.permutation(list(range(integrated.shape[0])))
 sc.pl.umap(integrated[rand_is, :], color=['Sample'], add_outline=False, legend_loc='right margin', size=15)
 
+fig, axes = plt.subplots(3,3, figsize=(18, 10))
+sc.pl.umap(integrated[rand_is, :], color=['Sample'], add_outline=False, legend_loc=None, size=20, groups=['S21_0046021T_MSI'], title='S21_0046021T_MSI', palette='Set3', ax=axes[0])
+sc.pl.umap(integrated[rand_is, :], color=['Sample'], add_outline=False, legend_loc=None, size=20, groups=['S21_0043584T_MSS'], title='S21_0043584T_MSS', palette='Set3', ax=axes[1])
+
 '''
 fig, axes = plt.subplots(1,2)
 sc.pl.umap(integrated[rand_is, :], color=['Sample'], add_outline=False, legend_loc=None, size=20, groups=['S21_0046021T_MSI'], title='S21_0046021T_MSI', palette='Set3', ax=axes[0])
@@ -317,3 +323,46 @@ sc.pl.umap(integrated[rand_is, :], color=['leiden_r05', 'leiden_r10'], add_outli
 
 ax = sc.pl.correlation_matrix(integrated, groupby='leiden_r05', show_correlation_numbers=True, dendrogram=True, ax=None, vmin=-1, vmax=1)
 ax = sc.pl.correlation_matrix(integrated, groupby='leiden_r10', show_correlation_numbers=True, dendrogram=True, ax=None, vmin=-1, vmax=1)
+
+# SingleR cell-type annotation
+# 위에 scanpy에서 size_factors 가지고 나눴던 것 다시 해야 할 것 같음.
+''' From bdcm03 (scRNA_R2 conda environment)
+suppressMessages(library(celldex))
+suppressMessages(library(SingleR))
+suppressMessages(library(scran))
+suppressMessages(library(Seurat))
+suppressMessages(library(Matrix))
+suppressMessages(library(BiocParallel))
+
+ref.data <- HumanPrimaryCellAtlasData(ensembl=FALSE) # Human Primary Cell Atlas Data
+
+# Warning message:
+# 'HumanPrimaryCellAtlasData' is deprecated.
+# Use 'celldex::HumanPrimaryCellAtlasData' instead.
+
+# ref.data.ensembl <- HumanPrimaryCellAtlasData(ensembl=TRUE) # Human Primary Cell Atlas Data
+# bpe.ensembl <- BlueprintEncodeData(ensembl=TRUE) # Blueprint ENCODE
+# bpe <- BlueprintEncodeData(ensembl=FALSE) # Blueprint ENCODE
+
+# https://medium.com/@daimin0514/how-to-convert-singlecellexperiment-to-anndata-8ec678b3a99e
+
+counts <- readMM('/mnt/mone/Project/WC300/07.scRNA-seq/Scran_normalization/test.mtx')
+#dim(counts)
+cellMeta<-read.csv('/mnt/mone/Project/WC300/07.scRNA-seq/Scran_normalization/counts_cellMeta.csv')
+geneMeta<-read.csv('/mnt/mone/Project/WC300/07.scRNA-seq/Scran_normalization/counts_geneMeta.csv')
+rownames(counts) <- cellMeta$Barcode
+colnames(counts) <- geneMeta$GeneName
+seurat_obj <- CreateSeuratObject(counts = t(counts), min.cells = 0, min.features = 0, names.field = 1, names.delim = "_")
+seurat_obj@meta.data <- cbind(cellMeta, seurat_obj@meta.data)
+sce_obj <- as.SingleCellExperiment(seurat_obj)
+sce_obj <- computeSumFactors(sce_obj, clusters = sce_obj$groups, min.mean=0.1, assay.type = "counts", BPPARAM = MulticoreParam(50))
+#size_factors_df <- data.frame("size_factors" = sizeFactors(sce_obj), row.names = colnames(sce_obj))
+
+sce_obj <- logNormCounts(sce_obj, log=FALSE) # adds normcounts in assays
+temp_norm <- log(assays(sce_obj)$normcounts +1)
+temp_norm <- as(temp_norm, "dgCMatrix")
+assays(sce_obj)$lognormcounts <- temp_norm
+
+sce_obj$groups <- as.character(sce_obj$groups) # Maybe not necessary (2023-03-30 20:01)
+predictions.lognormcounts.ref.data <- SingleR(test = sce_obj, assay.type.test = 'lognormcounts', ref = ref.data, labels = ref.data$label.fine)
+'''
