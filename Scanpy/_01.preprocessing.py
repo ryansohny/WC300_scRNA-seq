@@ -334,15 +334,11 @@ suppressMessages(library(Seurat))
 suppressMessages(library(Matrix))
 suppressMessages(library(BiocParallel))
 
-ref.data <- HumanPrimaryCellAtlasData(ensembl=FALSE) # Human Primary Cell Atlas Data
+ref.data <- celldex::HumanPrimaryCellAtlasData(ensembl=FALSE) # Human Primary Cell Atlas Data
 
-# Warning message:
-# 'HumanPrimaryCellAtlasData' is deprecated.
-# Use 'celldex::HumanPrimaryCellAtlasData' instead.
-
-# ref.data.ensembl <- HumanPrimaryCellAtlasData(ensembl=TRUE) # Human Primary Cell Atlas Data
-# bpe.ensembl <- BlueprintEncodeData(ensembl=TRUE) # Blueprint ENCODE
-# bpe <- BlueprintEncodeData(ensembl=FALSE) # Blueprint ENCODE
+# ref.data.ensembl <- celldex::HumanPrimaryCellAtlasData(ensembl=TRUE) # Human Primary Cell Atlas Data
+# bpe.ensembl <- celldex::BlueprintEncodeData(ensembl=TRUE) # Blueprint ENCODE
+# bpe <- celldex::BlueprintEncodeData(ensembl=FALSE) # Blueprint ENCODE
 
 # https://medium.com/@daimin0514/how-to-convert-singlecellexperiment-to-anndata-8ec678b3a99e
 
@@ -362,19 +358,129 @@ sce_obj <- logNormCounts(sce_obj, log=FALSE) # adds normcounts in assays
 temp_norm <- log(assays(sce_obj)$normcounts +1)
 temp_norm <- as(temp_norm, "dgCMatrix")
 assays(sce_obj)$lognormcounts <- temp_norm
-sce_obj$groups <- as.character(sce_obj$groups) # Maybe not necessary (2023-03-30 20:01)
+
+# Counts file
+writeMM(assays(sce_obj)$normcounts, '/mnt/mone/Project/WC300/07.scRNA-seq/Scran_normalization/test_scran.mtx')
+writeMM(assays(sce_obj)$lognormcounts, '/mnt/mone/Project/WC300/07.scRNA-seq/Scran_normalization/test_scranlog.mtx')
+
+barcodes <- data.frame(colnames(sce_obj))
+colnames(barcodes) <- 'Barcode'
+#write.csv(barcodes, '/mnt/mone/Project/WC300/07.scRNA-seq/Scran_normalization/test_scran_barcodes.csv',
+          quote = FALSE, row.names = FALSE) # Not necessary (duplicates)
+write.csv(barcodes, '/mnt/mone/Project/WC300/07.scRNA-seq/Scran_normalization/test_scranlog_barcodes.csv',
+          quote = FALSE, row.names = FALSE)
+genes <- data.frame(rownames(sce_obj))
+colnames(genes) <- 'Gene'
+#write.csv(genes, '/mnt/mone/Project/WC300/07.scRNA-seq/Scran_normalization/test_scran_genes.csv',
+          quote = FALSE,row.names = FALSE) # Not necessary (duplicates)
+write.csv(genes, '/mnt/mone/Project/WC300/07.scRNA-seq/Scran_normalization/test_scranlog_genes.csv',
+          quote = FALSE,row.names = FALSE)
+size_factors_df <- data.frame("size_factors" = sizeFactors(sce_obj), row.names = colnames(sce_obj))
+write.csv(size_factors_df, "/mnt/mone/Project/WC300/07.scRNA-seq/Scran_normalization/test_size_factors.csv")
+
+# For metadata information (Omitted this time)
+#cellMeta <- seo@meta.data
+#write.csv(cellMeta, '/home/daimin/data/single_cell/mouse_brain_vmh/SMART-seq_VMH_cpm_cellMeta.csv',
+#          quote = FALSE,row.names = TRUE)
+'''
+
+'''Back in scanpy_1.9.3 conda environment (cm03)'''
+# integrated의 layers (또는 anndata.X)에 scran을 집어넣는다.
+from scipy import sparse, io
+counts = io.mmread('/data/Projects/phenomata/01.Projects/97.Others/WC300_scRNA/test_scranlog.mtx') # 얘는 SCE file convention을 따른다.
+counts = sparse.csr_matrix(counts)
+barcodes = pd.read_csv('/data/Projects/phenomata/01.Projects/97.Others/WC300_scRNA/test_scranlog_barcodes.csv')
+genes = pd.read_csv('/data/Projects/phenomata/01.Projects/97.Others/WC300_scRNA/test_scranlog_genes.csv')
+adata = sc.AnnData(counts.T) # Therefore, we need to transpose the count matrix
+adata.obs_names=barcodes['Barcode'].values
+adata.var_names=genes['Gene'].values
+
+integrated.layers['scran_log1p'] = adata.X
+integrated.X = integrated.layers['scran_log1p']
+# integrated.uns['log1p']["base"] = None # scran normalized counts와 log transforming을 R에서 했으므로, sc.pp.log1p가 안들어가서 이걸 set하는게 필요할 수 있다.
+del adata, counts, barcodes, genes
+
+integrated.raw = integrated
+
+sc.pp.highly_variable_genes(integrated)
+integrated.var['highly_variable'].value_counts() # 3,867 (2023-03-28 18:00)
+
+sc.pp.scale(integrated, max_value=10) # tabula muris senis default (2021-08-10) # mean and std on adata.var
+#sc.pp.scale(test3, zero_center=True, max_value=10, copy=False, layer=None, obsm=None)
+
+cell_cycle_genes=[x.strip()[0] + x.strip()[1:].upper() for x in open("/data/Projects/phenomata/01.Projects/11.Vascular_Aging/Database/regev_lab_cell_cycle_genes.txt")]
+s_genes= cell_cycle_genes[:43]
+g2m_genes= cell_cycle_genes[43:]
+cell_cycle_genes = [x for x in cell_cycle_genes if x in integrated.var_names]
+sc.tl.score_genes_cell_cycle(integrated, s_genes=s_genes, g2m_genes=g2m_genes)
+
+
+sc.tl.pca(integrated, n_comps=100, use_highly_variable=True, svd_solver='arpack')
+sc.pl.pca(integrated, color=['Sample'], legend_loc='right margin', size=8, add_outline=False, color_map='CMRmap', annotate_var_explained=True, components=['1,2'])
+sc.pl.pca_variance_ratio(integrated, n_pcs=100, log=False)
+
+sce.pp.bbknn(integrated, batch_key='Sample', n_pcs=15, neighbors_within_batch=5, trim=None)
+sc.tl.umap(integrated, min_dist=0.5, spread=1.0, n_components=2, alpha=1.0, gamma=1.0, init_pos='spectral', method='umap')
+
+integrated.uns['Sample_colors'] = ['#8dd3c7', '#bebada', '#80b1d3', '#fccde5', '#bc80bd', '#ffed6f']
+
+np.random.seed(42)
+rand_is = np.random.permutation(list(range(integrated.shape[0])))
+sc.pl.umap(integrated[rand_is, :], add_outline=False, legend_loc='right margin', size=15, color=['Sample'])
+
+# Cell cycle phase (Checking for cell cycle effect)
+fig, axes = plt.subplots(1,3, figsize=(18, 5.5))
+sc.pl.umap(integrated[rand_is, :], color=['phase'], add_outline=False, legend_loc=None, size=20, groups=['G1'], title='G1', ax=axes[0])
+sc.pl.umap(integrated[rand_is, :], color=['phase'], add_outline=False, legend_loc=None, size=20, groups=['G2M'], title='G2M', ax=axes[1])
+sc.pl.umap(integrated[rand_is, :], color=['phase'], add_outline=False, legend_loc=None, size=20, groups=['S'], title='S', ax=axes[2])
+
+sc.tl.leiden(integrated, resolution=0.5, key_added='leiden_r05') #### 0 ~  ==> 2023-03-23
+sc.tl.leiden(integrated, resolution=1.0, key_added='leiden_r10')
+sc.pl.umap(integrated[rand_is, :], color=['leiden_r05', 'leiden_r10'], add_outline=False, legend_loc='on data', size=20)
+
+ax = sc.pl.correlation_matrix(integrated, groupby='leiden_r05', show_correlation_numbers=True, dendrogram=True, ax=None, vmin=-1, vmax=1)
+ax = sc.pl.correlation_matrix(integrated, groupby='leiden_r10', show_correlation_numbers=True, dendrogram=True, ax=None, vmin=-1, vmax=1)
+
+# UMAP projection with Microsatellite instability
+fig, axes = plt.subplots(1,2, figsize=(12, 5.5))
+sc.pl.umap(integrated[rand_is, :], color=['phase'], add_outline=False, legend_loc=None, size=20, groups=['G1'], title='G1', ax=axes[0])
+sc.pl.umap(integrated[rand_is, :], color=['phase'], add_outline=False, legend_loc=None, size=20, groups=['G2M'], title='G2M', ax=axes[1])
+
+# UMAP projection with Fraction of mtRNA expression
+sc.pl.umap(integrated[rand_is, :], color=['percent_mito'], add_outline=False, legend_loc=None, size=20, color_map=cmap, title='Fraction of mtRNA expression')
+
+cell_meta = integrated.obs[['leiden_r05']].copy()
+cell_meta['Barcode'] = cell_meta.index
+cell_meta.to_csv('/mnt/data/Projects/phenomata/01.Projects/97.Others/WC300_scRNA/integrated_leiden_r05_cellMeta.csv',index=None)
+
+'''
+### SingleR execution
+# Adding Leiden clustering information obtained from Scanpy into sce_obj
+leiden_df <- read.csv("/mnt/mone/Project/WC300/07.scRNA-seq/SingleR/integrated_leiden_r05_cellMeta.csv")
+rownames(leiden_df) <- leiden_df$Barcode
+leiden_df$Barcode <- NULL
+colData(sce_obj) <- cbind(colData(sce_obj), leiden_df)
+sce_obj$leiden_r05 <- as.character(sce_obj$leiden_r05) # Maybe not necessary (2023-03-31 17:06)
+
+
 # rm(counts)
 # rm(cellMeta)
 # rm(geneMeta)
 # rm(seurat_obj)
 # rm(temp_norm)
 
-# For test
-test_obj <- sce_obj[, 1:100] # hundred cell
-predictions.lognormcounts.ref.data <- SingleR(test = test_obj, assay.type.test = 'lognormcounts', ref = ref.data, labels = ref.data$label.fine)
-predictions.lognormcounts.ref.data <- SingleR(test = test_obj, assay.type.test = 'lognormcounts', ref = ref.data, labels = ref.data$label.fine, num.threads = 50) # 이상하게 작동이 안됨...
-predictions.lognormcounts.ref.data <- SingleR(test = test_obj, assay.type.test = 'lognormcounts', ref = ref.data, labels = ref.data$label.fine, BPPARAM = MulticoreParam(50))
+
+# test 1.
+#predictions.lognormcounts.ref.data <- SingleR(test = sce_obj, assay.type.test = 'lognormcounts', ref = ref.data, labels = ref.data$label.fine)
+#predictions.lognormcounts.bpe <- SingleR(test = sce_obj, assay.type.test = 'lognormcounts', ref = bpe, labels = bpe$label.fine)
+
+# test 2.
+predictions.lognormcounts.clusters.ref.data <- SingleR(test = sce_obj, assay.type.test = 'lognormcounts', ref = ref.data, labels = ref.data$label.fine, clusters = sce_obj$leiden_r05)
+predictions.lognormcounts.clusters.bpe <- SingleR(test = sce_obj, assay.type.test = 'lognormcounts', ref = bpe, labels = bpe$label.fine, clusters = sce_obj$leiden_r05)
 
 
-predictions.lognormcounts.ref.data <- SingleR(test = sce_obj, assay.type.test = 'lognormcounts', ref = ref.data, labels = ref.data$label.fine)
+plotScoreHeatmap(predictions.lognormcounts.clusters.ref.data, labels.use = predictions.lognormcounts.clusters.ref.data$pruned.labels)
+dev.off()
+
+
 '''
