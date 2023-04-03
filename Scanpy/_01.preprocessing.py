@@ -76,6 +76,11 @@ for sample in [S21_0043584T_MSS, S21_0047298T_MSS, S21_0048032T_MSS, S21_0046021
 integrated = AnnData.concatenate(S21_0043584T_MSS, S21_0047298T_MSS, S21_0048032T_MSS, S21_0046021T_MSI, S21_0048036T_MSI, S21_0049142T_MSI, join='outer', batch_key='Sample', batch_categories = ['S21_0043584T_MSS', 'S21_0047298T_MSS', 'S21_0048032T_MSS', 'S21_0046021T_MSI', 'S21_0048036T_MSI', 'S21_0049142T_MSI'], index_unique = '-')
 integrated.obs['predicted_doublet_cat'] = integrated.obs['predicted_doublet'].astype(str).astype('category')
 
+test = integrated.obs[['Sample']].copy()
+result = test.merge(clinic_info, left_on = "Sample", right_index = True)
+integrated.obs[list(result.columns)] = result
+del test, result
+
 sc.pp.calculate_qc_metrics(integrated, inplace=True)
 
 sc.pl.violin(integrated, 'total_counts', groupby='Sample', log=True, size=2, cut=0)
@@ -421,12 +426,14 @@ sc.pl.pca_variance_ratio(integrated, n_pcs=100, log=False)
 
 sce.pp.bbknn(integrated, batch_key='Sample', n_pcs=15, neighbors_within_batch=5, trim=None)
 sc.tl.umap(integrated, min_dist=0.5, spread=1.0, n_components=2, alpha=1.0, gamma=1.0, init_pos='spectral', method='umap')
+sc.tl.draw_graph(integrated, layout='fa')
 
 integrated.uns['Sample_colors'] = ['#8dd3c7', '#bebada', '#80b1d3', '#fccde5', '#bc80bd', '#ffed6f']
 
 np.random.seed(42)
 rand_is = np.random.permutation(list(range(integrated.shape[0])))
 sc.pl.umap(integrated[rand_is, :], add_outline=False, legend_loc='right margin', size=15, color=['Sample'])
+sc.pl.draw_graph(integrated[rand_is, :], add_outline=False, legend_loc='right margin', size=15, color=['Sample'])
 
 # Cell cycle phase (Checking for cell cycle effect)
 fig, axes = plt.subplots(1,3, figsize=(18, 5.5))
@@ -452,6 +459,11 @@ sc.pl.umap(integrated[rand_is, :], color=['percent_mito'], add_outline=False, le
 cell_meta = integrated.obs[['leiden_r05']].copy()
 cell_meta['Barcode'] = cell_meta.index
 cell_meta.to_csv('/mnt/data/Projects/phenomata/01.Projects/97.Others/WC300_scRNA/integrated_leiden_r05_cellMeta.csv',index=None)
+
+# UMAP projection with MSI status
+fig, axes = plt.subplots(2,1, figsize=(5,10.5))
+sc.pl.umap(integrated[rand_is, :], color=['MSI_type'], groups = 'MSI', add_outline=False, legend_loc=None, size=10, title='MSI type', palette = {'MSI':'#5F4B8BFF', 'MSS': '#E69A8DFF'}, ax=axes[0])
+sc.pl.umap(integrated[rand_is, :], color=['MSI_type'], groups = 'MSS', add_outline=False, legend_loc=None, size=10, title='MSS type', palette = {'MSI':'#5F4B8BFF', 'MSS': '#E69A8DFF'}, ax=axes[1])
 
 '''
 ### SingleR execution
@@ -482,5 +494,39 @@ predictions.lognormcounts.clusters.bpe <- SingleR(test = sce_obj, assay.type.tes
 plotScoreHeatmap(predictions.lognormcounts.clusters.ref.data, labels.use = predictions.lognormcounts.clusters.ref.data$pruned.labels)
 dev.off()
 
+
+'''
+
+
+'''SlingShot execution'''
+cell_meta = integrated.obs[['phase']].copy()
+cell_meta['Barcode'] = cell_meta.index
+cell_meta['UMAP1'] = integrated.obsm['X_umap'][:,0]
+cell_meta['UMAP2'] = integrated.obsm['X_umap'][:,1]
+cell_meta.to_csv('/mnt/data/Projects/phenomata/01.Projects/97.Others/WC300_scRNA/cellMeta_for_SlingShot.csv', index = None)
+
+'''Slingshot in R
+cellMeta_slingshot <- read.csv('/mnt/mone/Project/WC300/07.scRNA-seq/SlingShot/cellMeta_for_SlingShot.csv')
+rownames(cellMeta_slingshot) <- cellMeta_slingshot$Barcode
+cellMeta_slingshot$Barcode <- NULL
+
+reducedDim(sce_obj, "UMAP") <- cellMeta_slingshot[, c('UMAP1', 'UMAP2')]
+sce_obj <- slingshot::slingshot(sce_obj, clusterLabels = 'leiden_r05', reducedDim = 'UMAP')
+# PseudotimeOrdering Class Added to colData(sce_obj)$slingshot
+# colData(sce_obj)$slingshot
+# class: PseudotimeOrdering 
+# dim: 51387 5 
+# metadata(4): lineages mst slingParams curves
+# pathStats(2): pseudotime weights
+# cellnames(51387): AAACCCAAGGCCATAG-1-S21_0043584T_MSS
+#   AAACCCAAGTTACGAA-1-S21_0043584T_MSS ...
+#   TTTGTTGTCTCCTACG-1-S21_0049142T_MSI
+#   TTTGTTGTCTGAGAAA-1-S21_0049142T_MSI
+# cellData names(2): reducedDim clusterLabels
+# pathnames(5): Lineage1 Lineage2 Lineage3 Lineage4 Lineage5
+# pathData names(0):
+plot(reducedDim(sce_obj), pch = 16, cex = 0.5)
+lines(slingshot::SlingshotDataSet(sce_obj), lwd = 2, type = 'lineages', col = 'gray')
+dev.off()
 
 '''
